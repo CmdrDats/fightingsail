@@ -1,0 +1,17 @@
+Material My Material : Common/MatDefs/Misc/Unshaded.j3md {
+     MaterialParameters {
+        LightMap : Textures/wood.jpg
+        GlowMap : Textures/wood.jpg
+        GlowColor : 1.0 1.0 1.0 1.0
+        VertexColor : false
+        ColorMap : Textures/wood.jpg
+     }
+    AdditionalRenderState {
+      Wireframe Off
+      DepthWrite Off
+      AlphaTestFalloff 0.0
+      PointSprite Off
+      DepthTest Off
+      ColorWrite On
+    }
+}

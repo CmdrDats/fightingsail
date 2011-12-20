@@ -1,0 +1,8 @@
+Material My Material : Common/MatDefs/Misc/Sky.j3md {
+     MaterialParameters {
+        Texture : Flip Textures/sky_ang.jpg
+        SphereMap : true
+     }
+    AdditionalRenderState {
+    }
+}
