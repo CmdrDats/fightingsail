@@ -6,3 +6,5 @@ pom.xml
 .lein-deps-sum
 build
 private.properties
+native
+nbproject/private

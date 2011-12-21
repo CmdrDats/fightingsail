@@ -4,10 +4,44 @@
            (com.jme3.math Vector3f Vector2f Plane Quaternion FastMath)
            (com.jme3.scene Geometry)
            (com.jme3.scene.shape Box)
-           (com.jme3.math ColorRGBA))
+           (com.jme3.math ColorRGBA)
+           (com.jme3.input KeyInput)
+           (com.jme3.input.controls KeyTrigger ActionListener AnalogListener MouseButtonTrigger))
+  (:require [clojure.set :as set])
   (:require [swank.swank])
   (:gen-class
    :extends com.jme3.app.SimpleApplication))
+
+(defmacro auto-proxy
+  "Automatically build a proxy, stubbing out useless entries, ala: http://www.brool.com/index.php/snippet-automatic-proxy-creation-in-clojure"
+  [interfaces variables & args]
+  (let [defined (set (map #(str (first %)) args))
+        names (fn [i] (map #(.getName %) (.getMethods i)))
+        all-names (into #{} (apply concat (map names (map resolve interfaces))))
+        undefined (set/difference all-names defined) 
+        auto-gen (map (fn [x] `(~(symbol x) [& ~'args])) undefined)]
+    `(proxy ~interfaces ~variables ~@args ~@auto-gen)))
+
+(defmacro map-enums [enumclass]
+  `(apply merge (map #(hash-map (keyword (.name %)) %) (~(symbol (apply str (name enumclass) "/values"))))))
+
+;; Action queue to run actions in main thread (mostly for REPL use)
+(def action-list (ref []))
+
+(defn enlist
+  "Enlist a form to be run in the main GUI thread"
+  [form]
+  (dosync
+   (alter action-list conj form)))
+
+(defn handle-actionlist!
+  "The GUI thread will call this to invoke all the actions onthe queue stack"
+  []
+  (loop [action (first @action-list)]
+    ;; Pop it off the stack before actioning it so that if there's problems, it gets effectively skipped.
+    (let [next (first (dosync (alter action-list rest)))]
+      (eval action)
+      (if (not (nil? next)) (recur next)))))
 
 (def rootapp* (atom {}))
 
@@ -19,6 +53,9 @@
 
 (defn asset-manager []
   (.getAssetManager (:app @rootapp*)))
+
+(defn input-manager []
+  (.getInputManager (:app @rootapp*)))
 
 (defn viewport [] (.getViewPort (:app @rootapp*)))
 
@@ -37,12 +74,6 @@
 (defn vec3f [[x y z]]
   (Vector3f. x y z))
 
-;; TextureKey skyhi = new TextureKey("Textures/skyboxes/skybox_01.png", true);
-;; skyhi.setGenerateMips(true);
-;; skyhi.setAsCube(false);
-;; Texture texhi = assetManager.loadTexture(skyhi);
-;; Geometry sp = (Geometry) SkyFactory.createSky(assetManager, texhi, true);
-;; rootNode.attachChild(sp);
 
 (defn add-sky [node]
   (let [skyhi (com.jme3.asset.TextureKey. "Textures/sky_ang.jpg" true)]
@@ -50,6 +81,7 @@
     (let [texhi (.loadTexture (asset-manager) skyhi)
           sky (com.jme3.util.SkyFactory/createSky (asset-manager) texhi true)]
       (.attachChild node sky)
+      KeyTrigger
       )
     )
   )
@@ -63,13 +95,9 @@
   ([location [sx sy sz] color root]
      (let [b (Box. (vec3f location) sx sy sz)
            geom (com.jme3.scene.Geometry. "Box" b)
-           mat (Material. (.getAssetManager (:app @rootapp*)) "Common/MatDefs/Light/Lighting.j3md")]
+           mat (Material. (asset-manager) "Common/MatDefs/Light/Lighting.j3md")]
        (doto mat
          (.setFloat "Shininess" 5)
-         ;(.setBoolean "UseMaterialColors" true)
-         ;(.setColor "Ambient"  ColorRGBA/Black)
-         ;(.setColor "Diffuse"  color)
-         ;(.setColor "Specular"  ColorRGBA/Gray)
          (.setTexture "DiffuseMap" (.loadTexture (asset-manager) "Textures/wood.jpg")))
        (.setMaterial geom mat)
        (.attachChild root geom)
@@ -102,33 +130,6 @@
   ([] (com.jme3.scene.Node.))
   ([name] (com.jme3.scene.Node. name)))
 
-;; // we create a water processor
-;; SimpleWaterProcessor waterProcessor = new SimpleWaterProcessor(assetManager);
-;; waterProcessor.setReflectionScene(mainScene);
-
-;; // we set the water plane
-;; Vector3f waterLocation=new Vector3f(0,-6,0);
-;; waterProcessor.setPlane(new Plane(Vector3f.UNIT_Y, waterLocation.dot(Vector3f.UNIT_Y)));
-;; viewPort.addProcessor(waterProcessor);
-
-;; // we set wave properties
-;; waterProcessor.setWaterDepth(40);         // transparency of water
-;; waterProcessor.setDistortionScale(0.05f); // strength of waves
-;; waterProcessor.setWaveSpeed(0.05f);       // speed of waves
-
-;; // we define the wave size by setting the size of the texture coordinates
-;; Quad quad = new Quad(400,400);
-;; quad.scaleTextureCoordinates(new Vector2f(6f,6f));
-
-;; // we create the water geometry from the quad
-;; Geometry water=new Geometry("water", quad);
-;; water.setLocalRotation(new Quaternion().fromAngleAxis(-FastMath.HALF_PI, Vector3f.UNIT_X));
-;; water.setLocalTranslation(-200, -6, 250);
-;; water.setShadowMode(ShadowMode.Receive);
-;; water.setMaterial(waterProcessor.getMaterial());
-;; rootNode.attachChild(water);
-
-
 (defn v3f [[x y z]]
   (Vector3f. x y z))
 
@@ -145,10 +146,6 @@
       )
     )
   )
-
-;; Geometry waterPlane = waterProcessor.createWaterGeometry(10, 10);
-;; waterPlane.setLocalTranslation(-5, 0, 5);
-;; waterPlane.setMaterial(waterProcessor.getMaterial());
 
 (defn add-water [node location]
   (let [quad (doto (com.jme3.scene.shape.Quad. 400 400)
@@ -167,6 +164,59 @@
     )
   )
 
+(defn setup-player []
+  (let [box (Box. (Vector3f/ZERO), 0.5, 1, 0.5)
+        player (Geometry. "Player" box)
+        mat (Material. (asset-manager) "Common/MatDefs/Light/Lighting.j3md")]
+    (doto mat
+      (.setFloat "Shininess" 5)
+      (.setColor "Diffuse" (ColorRGBA/Blue))
+      )
+    (.setMaterial player mat)
+    (.attachChild (:mainscene @rootapp*) player)
+    (assoc-to-root! :player player)
+    
+    )
+  )
+
+(defn handle-analog [^String name value tpf]
+  (let [player (:player @rootapp*)
+        local (.getLocalTranslation player)]
+    (cond
+     (.equals "Left" name) (.setLocalTranslation player (- (.x local) (* 10 tpf)) (.y local) (.z local))
+     (.equals "Right" name) (.setLocalTranslation player (+ (.x local) (* 10 tpf)) (.y local) (.z local))
+     (.equals "Back" name) (.setLocalTranslation player (.x local) (- (.y local) (* 10 tpf)) (.z local))
+     (.equals "Forward" name) (.setLocalTranslation player (.x local) (+ (.y local) (* 10 tpf)) (.z local))
+     (.equals "Rotate" name) (.rotate 0.0  (* 10.0 tpf) 0.0)
+     )
+    )
+  )
+
+(defn get-action-listener []
+  (proxy [ActionListener] []
+              (onAction [^String name keypressed tpf] (.println (System/out) (str "Pressed pause? :) " keypressed)))))
+
+(defn get-analog-listener []
+  (proxy [AnalogListener] []
+    (onAnalog [^String name value tpf]
+      (handle-analog name value tpf))))
+
+(defn add-input-mapping [name & triggers]
+  (.addMapping (input-manager) name (into-array com.jme3.input.controls.Trigger triggers)))
+
+(defn setup-keybindings []
+  (add-input-mapping "Pause" (KeyTrigger. (KeyInput/KEY_P)))
+  (add-input-mapping "Left" (KeyTrigger. (KeyInput/KEY_J)))
+  (add-input-mapping "Right" (KeyTrigger. (KeyInput/KEY_L)))
+  (add-input-mapping "Forward" (KeyTrigger. (KeyInput/KEY_I)))
+  (add-input-mapping "Back" (KeyTrigger. (KeyInput/KEY_K)))
+  (add-input-mapping "Rotate" (KeyTrigger. (KeyInput/KEY_SPACE)))
+  
+  (doto (input-manager)
+    (.addListener (get-action-listener) (into-array String ["Pause"]))
+    (.addListener (get-analog-listener) (into-array String ["Left" "Right" "Forward" "Back" "Rotate"]))
+    ))
+
 (defn -simpleInitApp [this]
   (assoc-to-root! :app this)
   
@@ -179,42 +229,22 @@
     (.addLight main-scene (ambient-light (.mult (ColorRGBA/White) 1.13)))
     (.addLight main-scene (direction-light [-1.13 -1.13 1.13] (.mult (ColorRGBA/White) 0.7)))
     (add-sky main-scene)
+    (setup-player)
+    (setup-keybindings)
     (.attachChild (rootnode) main-scene)
     (add-water main-scene [0 0 0])
     )
 
-  
+  (.setPauseOnLostFocus this false)
   (.setMoveSpeed (.getFlyByCamera (:app @rootapp*)) 30.0)
   
 )
 
 (defn -simpleUpdate [this timediff]
+  (try
+    (handle-actionlist!)
+    (catch Exception e* (.printStackTrace e*)))
   ;(.setLocalTransform (rootnode) com.jme3.math.Transform/IDENTITY)
   ;(.rotate (rootnode) 0 timediff 0)
   )
 
-;; PointLight lamp_light = new PointLight();
-;; lamp_light.setColor(ColorRGBA.Yellow);
-;; lamp_light.setRadius(4f);
-;; lamp_light.setPosition(new Vector3f(lamp_geo.getLocalTranslation()));
-;; rootNode.addLight(lamp_light);
-  
-  ;; /** create a red box straight above the blue one at (1,3,1) */
-  ;; Box box2 = new Box( new Vector3f(1,3,1), 1,1,1) ;
-  ;; Geometry red = new Geometry("Box", box2)        ;
-  ;; Material mat2 = new Material(assetManager, 
-  ;;                              "Common/MatDefs/Misc/Unshaded.j3md") ;
-  ;; mat2.setColor("Color", ColorRGBA.Red)                             ;
-  ;; red.setMaterial(mat2)                                             ;
-
-
-
-;; /** Create a pivot node at (0,0,0) and attach it to the root node */
-;; Node pivot = new Node("pivot");
-;; rootNode.attachChild(pivot); // put this node in the scene
-
-;; /** Attach the two boxes to the *pivot* node. */
-;; pivot.attachChild(blue);
-;; pivot.attachChild(red);
-;; /** Rotate the pivot node: Note that both boxes have rotated! */
-;; pivot.rotate(.4f,.4f,0f);
