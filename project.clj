@@ -21,5 +21,5 @@
                  [swank-clojure/swank-clojure "1.3.3"]]
   :main ships.core
   :resources-path "assets"
-  :repl-options [:init nil :caught clj-stacktrace.repl/pst+]
+  
   :jvm-opts ["-Xmx512m"])
