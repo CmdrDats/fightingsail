@@ -8,3 +8,9 @@ build
 private.properties
 native
 nbproject/private
+/lwjgl64.dll
+/OpenAL64.dll
+/target
+/.classpath
+/.project
+/bin
