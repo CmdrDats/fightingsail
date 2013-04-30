@@ -26,5 +26,7 @@
   :resource-paths ["assets"]
   ;lein 1
   :resources-path "assets"
+
+  :aot [ships.core]
   
   :jvm-opts ["-Xmx512m"])
